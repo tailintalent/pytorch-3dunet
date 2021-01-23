@@ -1,15 +1,15 @@
 from functools import partial
-
+import pdb
 import torch
 from torch import nn as nn
 from torch.nn import functional as F
 
 
-def conv3d(in_channels, out_channels, kernel_size, bias, padding):
-    return nn.Conv3d(in_channels, out_channels, kernel_size, padding=padding, bias=bias)
+def conv3d(in_channels, out_channels, kernel_size, bias, padding, padding_mode):
+    return nn.Conv3d(in_channels, out_channels, kernel_size, padding=padding, bias=bias, padding_mode=padding_mode)
 
 
-def create_conv(in_channels, out_channels, kernel_size, order, num_groups, padding):
+def create_conv(in_channels, out_channels, kernel_size, order, num_groups, padding, padding_mode):
     """
     Create a list of modules with together constitute a single conv layer with non-linearity
     and optional batchnorm/groupnorm.
@@ -46,7 +46,7 @@ def create_conv(in_channels, out_channels, kernel_size, order, num_groups, paddi
         elif char == 'c':
             # add learnable bias only in the absence of batchnorm/groupnorm
             bias = not ('g' in order or 'b' in order)
-            modules.append(('conv', conv3d(in_channels, out_channels, kernel_size, bias, padding=padding)))
+            modules.append(('conv', conv3d(in_channels, out_channels, kernel_size, bias, padding=padding, padding_mode=padding_mode)))
         elif char == 'g':
             is_before_conv = i < order.index('c')
             if is_before_conv:
@@ -90,10 +90,10 @@ class SingleConv(nn.Sequential):
         padding (int or tuple):
     """
 
-    def __init__(self, in_channels, out_channels, kernel_size=3, order='gcr', num_groups=8, padding=1):
+    def __init__(self, in_channels, out_channels, kernel_size=3, order='gcr', num_groups=8, padding=1, padding_mode="zeros"):
         super(SingleConv, self).__init__()
 
-        for name, module in create_conv(in_channels, out_channels, kernel_size, order, num_groups, padding=padding):
+        for name, module in create_conv(in_channels, out_channels, kernel_size, order, num_groups, padding=padding, padding_mode=padding_mode):
             self.add_module(name, module)
 
 
@@ -120,7 +120,7 @@ class DoubleConv(nn.Sequential):
         padding (int or tuple): add zero-padding added to all three sides of the input
     """
 
-    def __init__(self, in_channels, out_channels, encoder, kernel_size=3, order='gcr', num_groups=8, padding=1):
+    def __init__(self, in_channels, out_channels, encoder, kernel_size=3, order='gcr', num_groups=8, padding=1, padding_mode="zeros"):
         super(DoubleConv, self).__init__()
         if encoder:
             # we're in the encoder path
@@ -137,11 +137,11 @@ class DoubleConv(nn.Sequential):
         # conv1
         self.add_module('SingleConv1',
                         SingleConv(conv1_in_channels, conv1_out_channels, kernel_size, order, num_groups,
-                                   padding=padding))
+                                   padding=padding, padding_mode=padding_mode))
         # conv2
         self.add_module('SingleConv2',
                         SingleConv(conv2_in_channels, conv2_out_channels, kernel_size, order, num_groups,
-                                   padding=padding))
+                                   padding=padding, padding_mode=padding_mode))
 
 
 class ExtResNetBlock(nn.Module):
@@ -155,19 +155,19 @@ class ExtResNetBlock(nn.Module):
     Notice we use ELU instead of ReLU (order='cge') and put non-linearity after the groupnorm.
     """
 
-    def __init__(self, in_channels, out_channels, kernel_size=3, order='cge', num_groups=8, **kwargs):
+    def __init__(self, in_channels, out_channels, kernel_size=3, order='cge', num_groups=8, padding_mode="zeros", **kwargs):
         super(ExtResNetBlock, self).__init__()
 
         # first convolution
-        self.conv1 = SingleConv(in_channels, out_channels, kernel_size=kernel_size, order=order, num_groups=num_groups)
+        self.conv1 = SingleConv(in_channels, out_channels, kernel_size=kernel_size, order=order, num_groups=num_groups, padding_mode=padding_mode)
         # residual block
-        self.conv2 = SingleConv(out_channels, out_channels, kernel_size=kernel_size, order=order, num_groups=num_groups)
+        self.conv2 = SingleConv(out_channels, out_channels, kernel_size=kernel_size, order=order, num_groups=num_groups, padding_mode=padding_mode)
         # remove non-linearity from the 3rd convolution since it's going to be applied after adding the residual
         n_order = order
         for c in 'rel':
             n_order = n_order.replace(c, '')
         self.conv3 = SingleConv(out_channels, out_channels, kernel_size=kernel_size, order=n_order,
-                                num_groups=num_groups)
+                                num_groups=num_groups, padding_mode=padding_mode)
 
         # create non-linearity separately
         if 'l' in order:
@@ -215,7 +215,7 @@ class Encoder(nn.Module):
 
     def __init__(self, in_channels, out_channels, conv_kernel_size=3, apply_pooling=True,
                  pool_kernel_size=2, pool_type='max', basic_module=DoubleConv, conv_layer_order='gcr',
-                 num_groups=8, padding=1):
+                 num_groups=8, padding=1, padding_mode="zeros"):
         super(Encoder, self).__init__()
         assert pool_type in ['max', 'avg']
         if apply_pooling:
@@ -231,7 +231,9 @@ class Encoder(nn.Module):
                                          kernel_size=conv_kernel_size,
                                          order=conv_layer_order,
                                          num_groups=num_groups,
-                                         padding=padding)
+                                         padding=padding,
+                                         padding_mode=padding_mode,
+                                        )
 
     def forward(self, x):
         if self.pooling is not None:
@@ -260,7 +262,7 @@ class Decoder(nn.Module):
     """
 
     def __init__(self, in_channels, out_channels, conv_kernel_size=3, scale_factor=(2, 2, 2), basic_module=DoubleConv,
-                 conv_layer_order='gcr', num_groups=8, mode='nearest', padding=1, upsample=True):
+                 conv_layer_order='gcr', num_groups=8, mode='nearest', padding=1, upsample=True, padding_mode="zeros"):
         super(Decoder, self).__init__()
 
         if upsample:
@@ -288,7 +290,9 @@ class Decoder(nn.Module):
                                          kernel_size=conv_kernel_size,
                                          order=conv_layer_order,
                                          num_groups=num_groups,
-                                         padding=padding)
+                                         padding=padding,
+                                         padding_mode=padding_mode,
+                                        )
 
     def forward(self, encoder_features, x):
         x = self.upsampling(encoder_features=encoder_features, x=x)
@@ -305,7 +309,7 @@ class Decoder(nn.Module):
 
 
 def create_encoders(in_channels, f_maps, basic_module, conv_kernel_size, conv_padding, layer_order, num_groups,
-                    pool_kernel_size):
+                    pool_kernel_size, padding_mode="zeros"):
     # create encoder path consisting of Encoder modules. Depth of the encoder is equal to `len(f_maps)`
     encoders = []
     for i, out_feature_num in enumerate(f_maps):
@@ -316,7 +320,9 @@ def create_encoders(in_channels, f_maps, basic_module, conv_kernel_size, conv_pa
                               conv_layer_order=layer_order,
                               conv_kernel_size=conv_kernel_size,
                               num_groups=num_groups,
-                              padding=conv_padding)
+                              padding=conv_padding,
+                              padding_mode=padding_mode,
+                             )
         else:
             # TODO: adapt for anisotropy in the data, i.e. use proper pooling kernel to make the data isotropic after 1-2 pooling operations
             encoder = Encoder(f_maps[i - 1], out_feature_num,
@@ -325,14 +331,16 @@ def create_encoders(in_channels, f_maps, basic_module, conv_kernel_size, conv_pa
                               conv_kernel_size=conv_kernel_size,
                               num_groups=num_groups,
                               pool_kernel_size=pool_kernel_size,
-                              padding=conv_padding)
+                              padding=conv_padding,
+                              padding_mode=padding_mode,
+                             )
 
         encoders.append(encoder)
 
     return nn.ModuleList(encoders)
 
 
-def create_decoders(f_maps, basic_module, conv_kernel_size, conv_padding, layer_order, num_groups, upsample):
+def create_decoders(f_maps, basic_module, conv_kernel_size, conv_padding, layer_order, num_groups, upsample, padding_mode="zeros"):
     # create decoder path consisting of the Decoder modules. The length of the decoder list is equal to `len(f_maps) - 1`
     decoders = []
     reversed_f_maps = list(reversed(f_maps))
@@ -358,7 +366,9 @@ def create_decoders(f_maps, basic_module, conv_kernel_size, conv_padding, layer_
                           conv_kernel_size=conv_kernel_size,
                           num_groups=num_groups,
                           padding=conv_padding,
-                          upsample=_upsample)
+                          upsample=_upsample,
+                          padding_mode=padding_mode,
+                         )
         decoders.append(decoder)
     return nn.ModuleList(decoders)
 

@@ -2,9 +2,13 @@ import importlib
 
 import torch.nn as nn
 
-from pytorch3dunet.unet3d.buildingblocks import DoubleConv, ExtResNetBlock, create_encoders, \
+import sys, os
+sys.path.append(os.path.join(os.path.dirname("__file__"), '..'))
+sys.path.append(os.path.join(os.path.dirname("__file__"), '..', '..'))
+sys.path.append(os.path.join(os.path.dirname("__file__"), '..', '..', '..'))
+from plasma.pytorch_3dunet.pytorch3dunet.unet3d.buildingblocks import DoubleConv, ExtResNetBlock, create_encoders, \
     create_decoders
-from pytorch3dunet.unet3d.utils import number_of_features_per_level
+from plasma.pytorch_3dunet.pytorch3dunet.unet3d.utils import number_of_features_per_level
 
 
 class Abstract3DUNet(nn.Module):
@@ -42,7 +46,7 @@ class Abstract3DUNet(nn.Module):
 
     def __init__(self, in_channels, out_channels, final_sigmoid, basic_module, f_maps=64, layer_order='gcr',
                  num_groups=8, num_levels=4, is_segmentation=True, testing=False,
-                 conv_kernel_size=3, pool_kernel_size=2, conv_padding=1, **kwargs):
+                 conv_kernel_size=3, pool_kernel_size=2, conv_padding=1, padding_mode="zeros", **kwargs):
         super(Abstract3DUNet, self).__init__()
 
         self.testing = testing
@@ -55,11 +59,11 @@ class Abstract3DUNet(nn.Module):
 
         # create encoder path
         self.encoders = create_encoders(in_channels, f_maps, basic_module, conv_kernel_size, conv_padding, layer_order,
-                                        num_groups, pool_kernel_size)
+                                        num_groups, pool_kernel_size, padding_mode=padding_mode)
 
         # create decoder path
         self.decoders = create_decoders(f_maps, basic_module, conv_kernel_size, conv_padding, layer_order, num_groups,
-                                        upsample=True)
+                                        upsample=True, padding_mode=padding_mode)
 
         # in the last layer a 1×1 convolution reduces the number of output
         # channels to the number of labels
@@ -180,7 +184,7 @@ class UNetnD(Abstract3DUNet):
     """
 
     def __init__(self, in_channels, out_channels, pos_dim, final_sigmoid=False, f_maps=64, layer_order='gcr',
-                 num_groups=8, num_levels=4, is_segmentation=True, conv_padding=1, **kwargs):
+                 num_groups=8, num_levels=4, is_segmentation=False, conv_padding=1, padding_mode="zeros", **kwargs):
         if pos_dim == 1:
             conv_kernel_size=(1, 1, 3)
             pool_kernel_size=(1, 1, 2)
@@ -193,6 +197,8 @@ class UNetnD(Abstract3DUNet):
             conv_kernel_size=(3, 3, 3)
             pool_kernel_size=(2, 2, 2)
             conv_padding_core = (conv_padding, conv_padding, conv_padding)
+        else:
+            raise Exception("pos_dim can only be 1, 2 or 3.")
         super(UNetnD, self).__init__(in_channels=in_channels,
                                      out_channels=out_channels,
                                      final_sigmoid=final_sigmoid,
@@ -205,8 +211,8 @@ class UNetnD(Abstract3DUNet):
                                      conv_kernel_size=conv_kernel_size,
                                      pool_kernel_size=pool_kernel_size,
                                      conv_padding=conv_padding_core,
+                                     padding_mode=padding_mode,
                                      **kwargs)
-
 
 
 def get_model(model_config):
