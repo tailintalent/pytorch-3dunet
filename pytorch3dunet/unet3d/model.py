@@ -174,6 +174,41 @@ class UNet2D(Abstract3DUNet):
                                      **kwargs)
 
 
+class UNetnD(Abstract3DUNet):
+    """
+    Just a standard nD Unet (n=1, 2 or 3). Arises naturally by specifying the non-existent dimension as 1.
+    """
+
+    def __init__(self, in_channels, out_channels, pos_dim, final_sigmoid=False, f_maps=64, layer_order='gcr',
+                 num_groups=8, num_levels=4, is_segmentation=True, conv_padding=1, **kwargs):
+        if pos_dim == 1:
+            conv_kernel_size=(1, 1, 3)
+            pool_kernel_size=(1, 1, 2)
+            conv_padding_core = (0, 0, conv_padding)
+        elif pos_dim == 2:
+            conv_kernel_size=(1, 3, 3)
+            pool_kernel_size=(1, 2, 2)
+            conv_padding_core = (0, conv_padding, conv_padding)
+        elif pos_dim == 3:
+            conv_kernel_size=(3, 3, 3)
+            pool_kernel_size=(2, 2, 2)
+            conv_padding_core = (conv_padding, conv_padding, conv_padding)
+        super(UNetnD, self).__init__(in_channels=in_channels,
+                                     out_channels=out_channels,
+                                     final_sigmoid=final_sigmoid,
+                                     basic_module=DoubleConv,
+                                     f_maps=f_maps,
+                                     layer_order=layer_order,
+                                     num_groups=num_groups,
+                                     num_levels=num_levels,
+                                     is_segmentation=is_segmentation,
+                                     conv_kernel_size=conv_kernel_size,
+                                     pool_kernel_size=pool_kernel_size,
+                                     conv_padding=conv_padding_core,
+                                     **kwargs)
+
+
+
 def get_model(model_config):
     def _model_class(class_name):
         modules = ['pytorch3dunet.unet3d.model']
